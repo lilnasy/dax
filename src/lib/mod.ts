@@ -1,64 +1,27 @@
-import { fs, localDataDir, path } from "../deps.ts";
 import { instantiate } from "./rs_lib.generated.js";
 
 export type WasmInstance = Awaited<ReturnType<typeof instantiate>>;
 
-async function getWasmFileUrl() {
-  const url = new URL("rs_lib_bg.wasm", import.meta.url);
-  if (url.protocol !== "file:") {
-    return (await cacheLocalDir(url)) ?? url;
-  }
-  return url;
-}
+const cache = await caches.open('dax')
 
-async function cacheLocalDir(url: URL) {
-  const localPath = await getUrlLocalPath(url);
-  if (localPath == null) {
-    return undefined;
-  }
-  if (!await fs.exists(localPath)) {
-    const fileBytes = await getUrlBytes(url);
-    await Deno.writeFile(localPath, new Uint8Array(fileBytes));
-  }
-  return path.toFileUrl(localPath);
-}
+export const wasmInstance = await loadWasm(new URL("rs_lib_bg.wasm", import.meta.url))
 
-async function getUrlLocalPath(url: URL) {
-  try {
-    const dataDirPath = await getInitializedLocalDataDirPath();
-    const version = getUrlVersion(url);
-    return path.join(dataDirPath, version + ".wasm");
-  } catch {
-    return undefined;
+async function loadWasm(wasmUrl: URL) {
+  const request = new Request(wasmUrl)
+  if (new URL(request.url).protocol === 'file:') {
+    return await instantiate({ url: wasmUrl })
   }
+  const maybeCached = await cache.match(request)
+  if (maybeCached === undefined) {
+    const response = await fetch(wasmUrl)
+    const newResponse = new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: { ...response.headers, 'Content-Type' : 'application/wasm' }
+    })
+    cache.put(request, newResponse.clone())
+    return await instantiate({ response: newResponse })
+  } 
+  const response = maybeCached
+  return await instantiate({ response })
 }
-
-async function getInitializedLocalDataDirPath() {
-  const dataDir = localDataDir();
-  if (dataDir == null) {
-    throw new Error(`Could not find local data directory.`);
-  }
-  const dirPath = path.join(dataDir, "dax");
-  await fs.ensureDir(dirPath);
-  return dirPath;
-}
-
-function getUrlVersion(url: URL) {
-  const version = url.pathname.match(/([0-9]+)\.([0-9]+)\.([0-9]+)/)?.[0];
-  if (version == null) {
-    throw new Error(`Could not find version in url: ${url}`);
-  }
-  return version;
-}
-
-async function getUrlBytes(url: URL) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Error downloading ${url}: ${response.statusText}`);
-  }
-  return await response.arrayBuffer();
-}
-
-export const wasmInstance = await instantiate({
-  url: await getWasmFileUrl(),
-});
