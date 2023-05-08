@@ -544,6 +544,7 @@ const imports = {
  * Options for instantiating a Wasm instance.
  * @typedef {Object} InstantiateOptions
  * @property {URL=} url - Optional url to the Wasm file to instantiate.
+ * @property {Response=} response - Optional response containing Wasm file to instantiate.
  * @property {DecompressCallback=} decompress - Callback to decompress the
  * raw Wasm file bytes before instantiating.
  */
@@ -606,6 +607,9 @@ export function isInstantiated() {
  * @param {InstantiateOptions} opts
  */
 async function instantiateModule(opts) {
+  if (opts.response !== undefined) {
+    return WebAssembly.instantiateStreaming(opts.response, imports)
+  }
   const wasmUrl = opts.url ?? new URL("rs_lib_bg.wasm", import.meta.url);
   const decompress = opts.decompress;
   const isFile = wasmUrl.protocol === "file:";
